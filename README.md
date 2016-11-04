@@ -1,6 +1,7 @@
 
 # nitro-webshot
 
+
 ### Installation
 
 ``` sh
