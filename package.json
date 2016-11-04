@@ -1,16 +1,18 @@
 {
   "name": "nitro-webshot",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm install && node test"
   },
   "author": "Jesús Germade <jesus@germade.es>",
   "license": "ISC",
   "dependencies": {
     "body-parser": "^1.15.2",
+    "colors": "^1.1.2",
     "express": "^4.14.0",
+    "mkdirp": "^0.5.1",
     "phantomjs": "^2.1.7"
   }
 }

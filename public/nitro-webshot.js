@@ -20,7 +20,7 @@
         var response = {
               status: request.status,
               statusText: request.statusText,
-              data: request.responseText
+              data: /application\/json/.test( request.getResponseHeader('Content-Type') ) ? JSON.parse(request.responseText) : request.responseText
             },
             listeners = ( request.status > 0 && request.status >= 200 && request.status <= 400 ) ? on.success : on.error;
 
@@ -55,6 +55,13 @@
     return request;
   }
 
+  function extend (dest, src) {
+    for( var key in src ) {
+      dest[key] = src[key];
+    }
+    return dest;
+  }
+
   var webshot = {
     parsedHTML: function () {
       var matchedBase = location.origin + '/',
@@ -65,15 +72,18 @@
 
       return html.replace(/<head>/, '<head><base href="' + matchedBase + '"/>').replace(/\s*<script[^>]*>([\s\S]*?)<\/script>\s*/g, '');
     },
-    render: function () {
+    render: function (options) {
       return http('http://localhost:3000/render', {
         method: 'POST',
         contentType: 'application/json',
-        data: {
-          html: webshot.parsedHTML()
-        }
+        data: extend(options || {}, {
+          html: webshot.parsedHTML(),
+          height: window.innerHeight,
+          width: window.innerWidth
+        })
       }).done(function (response) {
         console.log(response);
+        console.log('http://localhost:3000' + response.data.file);
       }).error(function (response) {
         console.error(response);
       });
