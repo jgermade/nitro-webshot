@@ -16,6 +16,7 @@
         on = { success: [], error: [] };
 
     request.onreadystatechange = function() {
+      // console.log('readystatechanged', request.readyState, request.status);
       if(request.readyState === 4) {
         var response = {
               status: request.status,
@@ -63,14 +64,29 @@
   }
 
   var webshot = {
+    documentHTML: function () {
+      [].forEach.call(document.querySelectorAll('input'), function (input) {
+        if( input.value ) {
+          input.setAttribute('webshot--value', input.value);
+        }
+      });
+      var html = document.documentElement.outerHTML.replace(/<input([^>]*?) webshot--value="(.*?)"([^>]*?)>/g, function (matched, prev, value, post) {
+        return '<input ' + prev + post + ' value="' + value + '">';
+      });
+      [].forEach.call(document.querySelectorAll('input[webshot--value]'), function (input) {
+        input.removeAttribute('webshot--value');
+      });
+
+      return html;
+    },
     parsedHTML: function (html) {
       var matchedBase = location.origin + '/',
-          html = (html || document.documentElement.outerHTML).replace(/<base\s+href="(.*)"[^>]*\/?>/, function (_matched, base) {
+          html = ( html || webshot.documentHTML() ).replace(/<base\s+href="(.*)"[^>]*\/?>/, function (_matched, base) {
             matchedBase = location.origin + base;
             return '';
           });
 
-      return html.replace(/<head>/, '<head>\n<base href="' + matchedBase + '"/>\n').replace(/\s*<script[^>]*>([\s\S]*?)<\/script>\s*/g, '');
+      return html.replace(/<head>/, '<head>\n<base href="' + matchedBase + '"/>\n');
     },
     render: function (options) {
       options = options || {};
@@ -84,7 +100,7 @@
           width: window.innerWidth
         })
       }).done(function (response) {
-        console.log(response);
+        console.log('response', response);
         console.log('http://localhost:3000' + response.data.file);
         console.log('http://localhost:3000' + response.data.htmlFile);
       }).error(function (response) {
@@ -94,12 +110,12 @@
     renderInline: function (options) {
       options = options || {};
 
-      var html = document.documentElement.outerHTML,
+      var html = webshot.documentHTML(),
           styles = [], i = 0;
 
       html = html.replace(/<link[^>]*href="(.*?)"[^>]*>/g, function (_matched, href) {
 
-        if( !/\.css(\?|$)/.test(href) ) {
+        if( !/\.css(\?|$)/.test(href) || ( /^https?:\/\//.test(href) && href.trim().indexOf(location.origin) < 0 ) ) {
           return _matched;
         }
 

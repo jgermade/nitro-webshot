@@ -24,6 +24,12 @@ function uuid4 () {
   return uuid;
 }
 
+function dirname (filepath) {
+  var parts = filepath.split('/');
+  parts.pop();
+  return parts.join('/');
+}
+
 require('colors');
 
 function runServer (port, hostname) {
@@ -54,7 +60,7 @@ function runServer (port, hostname) {
   app.use(express.static('public'))
 
   app.post('/render', function (req, res) {
-    var html = req.body.html;
+    var html = req.body.html.replace(/\s*<script[^>]*>([\s\S]*?)<\/script>\s*/g, '');
     var resultFile = uuid4() + ( req.body.filename ? ( '/' + req.body.filename ) : '.png' ),
         htmlFile = resultFile.replace(/\.[a-zA-Z]+$/, '.html')
     // renderJS = 'render-this-html.js';
@@ -81,58 +87,64 @@ function runServer (port, hostname) {
 
     var htmlEscaped = html.replace(/'/g, '\\\'').replace(/\n/g, '');
 
-    mkdirp( (function () {
-      var parts = renderScript.split('/');
-      parts.pop();
-      return parts.join('/');
-    })(), function (err) {
+    console.log('resultDir', dirname('public/renders/' + resultFile), resultFile );
+    console.log('renderScriptDir', dirname(renderScript) );
+
+    mkdirp( dirname('public/renders/' + resultFile), function (err) {
       if (err) {
-        res.status(500).send('error creating tmp script');
+        res.status(500).send('error creating output folder');
         return;
       }
 
-      fs.writeFileSync(`public/renders/${htmlFile}`, html, { encoding: 'utf8' });
+      mkdirp( dirname(renderScript), function (err) {
+        if (err) {
+          res.status(500).send('error creating tmp script');
+          return;
+        }
 
-      // fs.writeFileSync(renderScript , `
-      //   var page = require('webpage').create();
-      //   page.viewportSize = { width: ${ req.body.width || 1360 }, height: ${ req.body.height || 900 } };
-      //   page.content = '${ htmlEscaped }';
-      //   setTimeout(function() {
-      //     page.render('public/renders/${resultFile}');
-      //     phantom.exit();
-      //   }, ${ req.body.wait || 1000 });
-      //   `, { encoding: 'utf8' });
+        fs.writeFileSync(`public/renders/${htmlFile}`, html, { encoding: 'utf8' });
 
-      fs.writeFileSync(renderScript , `
-        var page = require('webpage').create();
-        page.viewportSize = { width: ${ req.body.width || 1360 }, height: ${ req.body.height || 900 } };
-        page.open('${baseUrl}/renders/${htmlFile}', function(status) {
-          console.log("Status: " + status);
-          if(status === "success") {
-            page.scrollPosition = {
-              top: 100,
-              left: 0
-            };
-            setTimeout(function() {
-              page.render('public/renders/${resultFile}');
-              phantom.exit();
-            }, ${ req.body.wait || 1000 });
-          }
-        });
-        `, { encoding: 'utf8' });
+        // fs.writeFileSync(renderScript , `
+        //   var page = require('webpage').create();
+        //   page.viewportSize = { width: ${ req.body.width || 1360 }, height: ${ req.body.height || 900 } };
+        //   page.content = '${ htmlEscaped }';
+        //   setTimeout(function() {
+        //     page.render('public/renders/${resultFile}');
+        //     phantom.exit();
+        //   }, ${ req.body.wait || 1000 });
+        //   `, { encoding: 'utf8' });
 
-        require('child_process').exec('$(npm bin)/phantomjs ' + renderScript, function (err) {
-          if( !err ) {
-            res.json({
-              file: '/renders/' + resultFile,
-              htmlFile: `/renders/${htmlFile}`,
-              html: html,
-              htmlEscaped: htmlEscaped
-            });
-            // res.send(resultFile);
-          } else {
-            res.status(500).send('error rendering!');
-          }
+        fs.writeFileSync(renderScript , `
+          var page = require('webpage').create();
+          page.viewportSize = { width: ${ req.body.width || 1360 }, height: ${ req.body.height || 900 } };
+          page.open('${baseUrl}/renders/${htmlFile}', function(status) {
+            console.log("Status: " + status);
+            if(status === "success") {
+              page.scrollPosition = {
+                top: 100,
+                left: 0
+              };
+              setTimeout(function() {
+                page.render('public/renders/${resultFile}');
+                phantom.exit();
+              }, ${ req.body.wait || 1000 });
+            }
+          });
+          `, { encoding: 'utf8' });
+
+          require('child_process').exec('$(npm bin)/phantomjs ' + renderScript, function (err) {
+            if( !err ) {
+              res.json({
+                file: '/renders/' + resultFile,
+                htmlFile: `/renders/${htmlFile}`,
+                html: html,
+                htmlEscaped: htmlEscaped
+              });
+              // res.send(resultFile);
+            } else {
+              res.status(500).send('error rendering!');
+            }
+          });
         });
       });
 
