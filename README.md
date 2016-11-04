@@ -1,6 +1,7 @@
-
 # nitro-webshot
 
+
+The goal of this proyect is to provide a way to render current page in server side to avoid cross-browser issues.
 
 ### Installation
 
