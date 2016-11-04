@@ -63,21 +63,23 @@
   }
 
   var webshot = {
-    parsedHTML: function () {
+    parsedHTML: function (html) {
       var matchedBase = location.origin + '/',
-          html = document.documentElement.outerHTML.replace(/<base\s+href="(.*)"[^>]*\/?>/, function (_matched, base) {
+          html = (html || document.documentElement.outerHTML).replace(/<base\s+href="(.*)"[^>]*\/?>/, function (_matched, base) {
             matchedBase = location.origin + base;
             return '';
           });
 
-      return html.replace(/<head>/, '<head><base href="' + matchedBase + '"/>').replace(/\s*<script[^>]*>([\s\S]*?)<\/script>\s*/g, '');
+      return html.replace(/<head>/, '<head>\n<base href="' + matchedBase + '"/>\n').replace(/\s*<script[^>]*>([\s\S]*?)<\/script>\s*/g, '');
     },
     render: function (options) {
+      options = options || {};
+
       return http('http://localhost:3000/render', {
         method: 'POST',
         contentType: 'application/json',
-        data: extend(options || {}, {
-          html: webshot.parsedHTML(),
+        data: extend(options, {
+          html: options.html || webshot.parsedHTML(),
           height: window.innerHeight,
           width: window.innerWidth
         })
@@ -87,42 +89,51 @@
       }).error(function (response) {
         console.error(response);
       });
+    },
+    renderInline: function (options) {
+      options = options || {};
+
+      var html = document.documentElement.outerHTML,
+          styles = [], i = 0;
+
+      html = html.replace(/<link[^>]*href="(.*?)"[^>]*>/g, function (_matched, href) {
+
+        if( !/\.css(\?|$)/.test(href) ) {
+          return _matched;
+        }
+
+        var n = i++;
+
+        styles[n] = null;
+        console.log('loading style', href );
+        http( href ).done(function (response) {
+          styles[n] = response.data.replace(/url\(["']?(.*?)["']?\)/, function (matched, url) {
+            if( /^\//.test(url) ) {
+              return 'url(\'' + location.origin + url + '\')';
+            }
+            return matched;
+          });
+
+          if( styles.every(function (style) { return style !== null; }) ) {
+
+            webshot.render(extend(options, {
+              html: webshot.parsedHTML( html.replace(/\$css{(.*?)}/g, function (matched, index) {
+                return styles[Number(index)];
+              }) )
+            }));
+          }
+        });
+
+        return '\n<style rel="stylesheet">\n$css{' + (styles.length - 1) + '}\n</style>\n';
+      });
+
+      if( !i ) {
+        webshot.render(extend(options || {}, { html: webshot.parsedHTML(html) }));
+      }
+
     }
   };
 
   return webshot;
 
 }));
-
-
-//
-// window.checkoutHTML = function () {
-//
-//   // var html = document.documentElement.outerHTML,
-//   //     styles = [];
-//   //
-//   // html = html.replace(/<link[^>]*href="(.*?)"/g, function (_matched, href) {
-//   //   styles.push( fetch(href).then(function (response) { return response.text(); }) );
-//   //   console.debug('loading style', href);
-//   //   return '<style rel="stylkesheet">$css{' + (styles.length - 1) + '}</style>';
-//   // });
-//   //
-//   // return Promise.all(styles).then(function (fetchedStyles) {
-//   //   html = html.replace(/\$css{(.*?)}/g, function (matched, index) {
-//   //     return fetchedStyles[Number(index)];
-//   //   });
-//   //
-//   //   console.log('render html', html);
-//   //   return html;
-//   // });
-//
-//
-//   var matchedBase = location.origin + '/',
-//       html = document.documentElement.outerHTML.replace(/<base\s+href="(.*)"[^>]*\/?>/, function (_matched, base) {
-//         matchedBase = location.origin + base;
-//         return '';
-//       });
-//
-//   return html.replace(/<head>/, '<head><base href="' + matchedBase + '"/>').replace(/\s*<script[^>]*>([\s\S]*?)<\/script>\s*/g, '');
-//
-// };

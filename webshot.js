@@ -49,12 +49,31 @@ function runServer (port, hostname) {
   app.use(express.static('public'))
 
   app.post('/render', function (req, res) {
-    var html = req.body.html.replace(/'/g, '\\\'').replace(/\n/g, ''),
-    resultFile = uuid4() + '/' + ( req.body.filename || 'page.png' ),
+    var html = req.body.html;
+    var resultFile = uuid4() + ( req.body.filename ? ( '/' + req.body.filename ) : '.png' );
     // renderJS = 'render-this-html.js';
-    renderScript = '/tmp/nitro-webshot/' + resultFile + '.js';
+    var renderScript = '/tmp/nitro-webshot/' + resultFile + '.js';
 
     var mkdirp = require('mkdirp');
+
+    html = html.replace(/<\/head>/, `\n<style rel="stylesheet">
+    *, *:before, *:after {
+      -webkit-transition: none !important;
+      -moz-transition: none !important;
+      -o-transition: none !important;
+      -ms-transition: none !important;
+      transition: none !important;
+      -webkit-animation: none !important;
+      -moz-animation: none !important;
+      -o-animation: none !important;
+      -ms-animation: none !important;
+      animation: none !important;
+    }
+    </style>\n</head>`);
+
+    fs.writeFileSync('last.html' , html, { encoding: 'utf8' });
+
+    var htmlEscaped = html.replace(/'/g, '\\\'').replace(/\n/g, '');
 
     mkdirp( (function () {
       var parts = renderScript.split('/');
@@ -69,7 +88,7 @@ function runServer (port, hostname) {
       fs.writeFileSync(renderScript , `
         var page = require('webpage').create();
         page.viewportSize = { width: ${ req.body.width || 1360 }, height: ${ req.body.height || 900 } };
-        page.content = '${ html }';
+        page.content = '${ htmlEscaped }';
         setTimeout(function() {
           page.render('public/renders/${resultFile}');
           phantom.exit();
@@ -79,7 +98,9 @@ function runServer (port, hostname) {
         require('child_process').exec('$(npm bin)/phantomjs ' + renderScript, function (err) {
           if( !err ) {
             res.json({
-              file: '/renders/' + resultFile
+              file: '/renders/' + resultFile,
+              html: html,
+              htmlEscaped: htmlEscaped
             });
             // res.send(resultFile);
           } else {

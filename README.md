@@ -29,3 +29,7 @@ require('nitro-webshot').server(3000, '0.0.0.0');
 
 var request = nitroWebshot.render();
 ```
+
+#### TODO
+
+- [ ] Try http://slimerjs.org/
