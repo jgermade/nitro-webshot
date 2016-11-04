@@ -86,6 +86,7 @@
       }).done(function (response) {
         console.log(response);
         console.log('http://localhost:3000' + response.data.file);
+        console.log('http://localhost:3000' + response.data.htmlFile);
       }).error(function (response) {
         console.error(response);
       });
@@ -107,11 +108,8 @@
         styles[n] = null;
         console.log('loading style', href );
         http( href ).done(function (response) {
-          styles[n] = response.data.replace(/url\(["']?(.*?)["']?\)/, function (matched, url) {
-            if( /^\//.test(url) ) {
-              return 'url(\'' + location.origin + url + '\')';
-            }
-            return matched;
+          styles[n] = response.data.replace(/url\(["']?(\/.*?)["']?\)/g, function (matched, url) {
+            return 'url(\'' + location.origin + url + '\')';
           });
 
           if( styles.every(function (style) { return style !== null; }) ) {
@@ -119,6 +117,8 @@
             webshot.render(extend(options, {
               html: webshot.parsedHTML( html.replace(/\$css{(.*?)}/g, function (matched, index) {
                 return styles[Number(index)];
+              }).replace(/<img(.*?)src="(\/.*?)"/g, function (matched, props, src) {
+                return '<img' + props + 'src="' + location.origin + src + '"';
               }) )
             }));
           }

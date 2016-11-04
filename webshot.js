@@ -28,6 +28,11 @@ require('colors');
 
 function runServer (port, hostname) {
 
+  port = port || 3000;
+  hostname = hostname || '0.0.0.0';
+
+  var baseUrl = `http://${hostname}:${port}`;
+
   var express = require('express')
   var app = express()
   var bodyParser = require('body-parser')
@@ -50,7 +55,8 @@ function runServer (port, hostname) {
 
   app.post('/render', function (req, res) {
     var html = req.body.html;
-    var resultFile = uuid4() + ( req.body.filename ? ( '/' + req.body.filename ) : '.png' );
+    var resultFile = uuid4() + ( req.body.filename ? ( '/' + req.body.filename ) : '.png' ),
+        htmlFile = resultFile.replace(/\.[a-zA-Z]+$/, '.html')
     // renderJS = 'render-this-html.js';
     var renderScript = '/tmp/nitro-webshot/' + resultFile + '.js';
 
@@ -85,20 +91,41 @@ function runServer (port, hostname) {
         return;
       }
 
+      fs.writeFileSync(`public/renders/${htmlFile}`, html, { encoding: 'utf8' });
+
+      // fs.writeFileSync(renderScript , `
+      //   var page = require('webpage').create();
+      //   page.viewportSize = { width: ${ req.body.width || 1360 }, height: ${ req.body.height || 900 } };
+      //   page.content = '${ htmlEscaped }';
+      //   setTimeout(function() {
+      //     page.render('public/renders/${resultFile}');
+      //     phantom.exit();
+      //   }, ${ req.body.wait || 1000 });
+      //   `, { encoding: 'utf8' });
+
       fs.writeFileSync(renderScript , `
         var page = require('webpage').create();
         page.viewportSize = { width: ${ req.body.width || 1360 }, height: ${ req.body.height || 900 } };
-        page.content = '${ htmlEscaped }';
-        setTimeout(function() {
-          page.render('public/renders/${resultFile}');
-          phantom.exit();
-        }, ${ req.body.wait || 1000 });
+        page.open('${baseUrl}/renders/${htmlFile}', function(status) {
+          console.log("Status: " + status);
+          if(status === "success") {
+            page.scrollPosition = {
+              top: 100,
+              left: 0
+            };
+            setTimeout(function() {
+              page.render('public/renders/${resultFile}');
+              phantom.exit();
+            }, ${ req.body.wait || 1000 });
+          }
+        });
         `, { encoding: 'utf8' });
 
         require('child_process').exec('$(npm bin)/phantomjs ' + renderScript, function (err) {
           if( !err ) {
             res.json({
               file: '/renders/' + resultFile,
+              htmlFile: `/renders/${htmlFile}`,
               html: html,
               htmlEscaped: htmlEscaped
             });
@@ -111,12 +138,7 @@ function runServer (port, hostname) {
 
     });
 
-    port = port || 3000;
-    hostname = hostname || '0.0.0.0';
-
     app.listen(3000, hostname, function () {
-      var baseUrl = `http://${hostname}:${port}`;
-
       console.log('Listening on ' + baseUrl.green )
 
       console.log('\ncopy and paste following into your browser console:\n'.yellow)
