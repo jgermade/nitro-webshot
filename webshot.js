@@ -73,7 +73,7 @@ function runServer (port, hostname) {
         setTimeout(function() {
           page.render('public/renders/${resultFile}');
           phantom.exit();
-        }, ${ req.body.wait || 10 });
+        }, ${ req.body.wait || 1000 });
         `, { encoding: 'utf8' });
 
         require('child_process').exec('$(npm bin)/phantomjs ' + renderScript, function (err) {
