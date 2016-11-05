@@ -30,7 +30,109 @@ function dirname (filepath) {
   return parts.join('/');
 }
 
+function escapeHTML (html) {
+  return html.replace(/'/g, '\\\'').replace(/"/g, '\\"').replace(/\n/g, '');
+}
+
+function htmlNoAnimations (html) {
+  return html.replace(/<\/head>/, `
+<style rel="stylesheet">
+  *, *:before, *:after {
+    -webkit-transition: none !important;
+    -moz-transition: none !important;
+    -o-transition: none !important;
+    -ms-transition: none !important;
+    transition: none !important;
+    -webkit-animation: none !important;
+    -moz-animation: none !important;
+    -o-animation: none !important;
+    -ms-animation: none !important;
+    animation: none !important;
+  }
+</style>\n</head>`);
+}
+
+function htmlNoScripts (html) {
+  return html.replace(/\s*<script[^>]*>([\s\S]*?)<\/script>\s*/g, '');
+}
+
 require('colors');
+
+var express = require('express')
+var bodyParser = require('body-parser')
+var fs = require('fs')
+var mkdirp = require('mkdirp')
+
+var $q = require('q-promise');
+function promisify (fn, options) {
+  return function () {
+    var _this = this, _args = [].slice.call(arguments);
+
+    if( options ) {
+      _args.push(_args, options);
+    }
+
+    return $q(function (resolve, reject) {
+      fn.apply(_this, _args.concat(function (err, result) {
+        if( err ) {
+          reject(err);
+        } else {
+          resolve(result);
+        }
+      }) );
+    });
+  };
+}
+
+var _readFile = promisify(fs.createReadStream),
+    _writeFile = promisify(fs.createWriteStream),
+    file = {
+      read: promisify(fs.readFile, { encoding: 'utf8' }),
+      write: promisify(fs.writeFile, { encoding: 'utf8' }),
+      mkdirp: promisify(mkdirp)
+    },
+    exec = promisify(require('child_process').exec);
+
+function phantomjsCode (baseUrl, req, htmlFile, resultFile) {
+return `
+  var page = require('webpage').create();
+  // if( '${ req.userAgent }' ) {
+  //   page.onInitialized = function() {
+  //     page.settings.userAgent = '${ req.userAgent }';
+  //   };
+  // }
+  page.viewportSize = { width: ${ req.width || 1360 }, height: ${ req.height || 900 } };
+  page.open('${baseUrl}/renders/${htmlFile}', function(status) {
+    console.log("Status: " + status);
+    if(status === "success") {
+      page.scrollPosition = {
+        top: 100,
+        left: 0
+      };
+      setTimeout(function() {
+        page.render('public/renders/phantom-${resultFile}');
+        phantom.exit();
+      }, ${ req.wait || 1000 });
+    }
+  });
+  `;
+}
+
+function slimerjsCode (baseUrl, req, htmlFile, resultFile) {
+return `
+  var webpage = require('webpage').create();
+  webpage
+  .open('${baseUrl}/renders/${htmlFile}')
+  .then(function(){
+    // store a screenshot of the page
+    webpage.viewportSize = { width: ${ req.width || 1360 }, height: ${ req.height || 900 } };
+    // webpage.render('public/renders/slimer-${resultFile}', { onlyViewport: true });
+    webpage.render('public/renders/slimer-${resultFile}', { onlyViewport: false });
+
+    slimer.exit();
+  });
+  `;
+}
 
 function runServer (port, hostname) {
 
@@ -39,10 +141,7 @@ function runServer (port, hostname) {
 
   var baseUrl = `http://${hostname}:${port}`;
 
-  var express = require('express')
   var app = express()
-  var bodyParser = require('body-parser')
-  var fs = require('fs')
 
   app.use(bodyParser.json({ limit: '5mb' })); // for parsing application/json
   app.use(bodyParser.urlencoded({ extended: true, limit: '5mb' })); // for parsing application/x-www-form-urlencoded
@@ -53,165 +152,83 @@ function runServer (port, hostname) {
     next();
   });
 
-  // app.get('/', function (req, res) {
-  //   res.send('Hello World!')
-  // })
-
   app.use(express.static('public'))
 
   app.post('/render', function (req, res) {
-    var html = req.body.html.replace(/\s*<script[^>]*>([\s\S]*?)<\/script>\s*/g, '');
+
+    var html = req.body.html,
+        htmlShoot = htmlNoAnimations(htmlNoScripts(html));
+
     var resultFile = uuid4() + ( req.body.filename ? ( '/' + req.body.filename ) : '.png' ),
         htmlFile = resultFile.replace(/\.[a-zA-Z]+$/, '.html')
-    // renderJS = 'render-this-html.js';
-    var renderScript = '/tmp/nitro-webshot/' + resultFile + '.js';
 
-    var mkdirp = require('mkdirp');
+    var phantomScript = '/tmp/nitro-webshot/phantom-' + resultFile + '.js',
+        slimerScript = '/tmp/nitro-webshot/slimer-' + resultFile + '.js';
 
-    html = html.replace(/<\/head>/, `\n<style rel="stylesheet">
-    *, *:before, *:after {
-      -webkit-transition: none !important;
-      -moz-transition: none !important;
-      -o-transition: none !important;
-      -ms-transition: none !important;
-      transition: none !important;
-      -webkit-animation: none !important;
-      -moz-animation: none !important;
-      -o-animation: none !important;
-      -ms-animation: none !important;
-      animation: none !important;
-    }
-    </style>\n</head>`);
+    $q.all([
+      file.write('last.html', html),
+      file.mkdirp( dirname('public/renders/phantom-' + resultFile) ),
+      file.mkdirp( dirname('public/renders/slimer-' + resultFile) ),
+      file.mkdirp( dirname(phantomScript) )
+    ]).then(function () {
 
-    fs.writeFileSync('last.html' , html, { encoding: 'utf8' });
+      return $q.all([
+        file.write(`public/renders/${htmlFile}`, htmlShoot),
+        file.write( phantomScript, phantomjsCode(baseUrl, req.body, htmlFile, resultFile) ),
+        file.write( slimerScript, slimerjsCode(baseUrl, req.body, htmlFile, resultFile) )
+      ]);
 
-    var htmlEscaped = html.replace(/'/g, '\\\'').replace(/\n/g, '');
+    }).then(function () {
 
-    console.log('resultDir', dirname('public/renders/' + resultFile), resultFile );
-    console.log('renderScriptDir', dirname(renderScript) );
-
-    mkdirp( dirname('public/renders/' + resultFile), function (err) {
-      if (err) {
-        res.status(500).send('error creating output folder');
-        return;
-      }
-
-      mkdirp( dirname(renderScript), function (err) {
-        if (err) {
-          res.status(500).send('error creating tmp script');
-          return;
-        }
-
-        fs.writeFileSync(`public/renders/${htmlFile}`, html, { encoding: 'utf8' });
-
-        // fs.writeFileSync(renderScript , `
-        //   var page = require('webpage').create();
-        //   page.viewportSize = { width: ${ req.body.width || 1360 }, height: ${ req.body.height || 900 } };
-        //   page.content = '${ htmlEscaped }';
-        //   setTimeout(function() {
-        //     page.render('public/renders/${resultFile}');
-        //     phantom.exit();
-        //   }, ${ req.body.wait || 1000 });
-        //   `, { encoding: 'utf8' });
-
-        fs.writeFileSync(renderScript , `
-          var page = require('webpage').create();
-          page.viewportSize = { width: ${ req.body.width || 1360 }, height: ${ req.body.height || 900 } };
-          page.open('${baseUrl}/renders/${htmlFile}', function(status) {
-            console.log("Status: " + status);
-            if(status === "success") {
-              page.scrollPosition = {
-                top: 100,
-                left: 0
-              };
-              setTimeout(function() {
-                page.render('public/renders/${resultFile}');
-                phantom.exit();
-              }, ${ req.body.wait || 1000 });
-            }
-          });
-          `, { encoding: 'utf8' });
-
-          require('child_process').exec('$(npm bin)/phantomjs ' + renderScript, function (err) {
-            if( !err ) {
-              res.json({
-                file: '/renders/' + resultFile,
-                htmlFile: `/renders/${htmlFile}`,
-                html: html,
-                htmlEscaped: htmlEscaped
-              });
-              // res.send(resultFile);
-            } else {
-              res.status(500).send('error rendering!');
-            }
-          });
+      $q.all([
+        exec('$(npm bin)/phantomjs ' + phantomScript),
+        exec('$(npm bin)/slimerjs ' + slimerScript)
+      ]).then(function () {
+        res.json({
+          html: html,
+          htmlShoot: htmlShoot,
+          htmlFile: `/renders/phantom/${htmlFile}`,
+          phantom: '/renders/phantom-' + resultFile,
+          slimer: '/renders/slimer-' + resultFile
         });
+      }, function () {
+        res.status(500).send('error rendering!');
       });
 
     });
 
-    app.listen(3000, hostname, function () {
-      console.log('Listening on ' + baseUrl.green )
+  });
 
-      console.log('\ncopy and paste following into your browser console:\n'.yellow)
-      console.log(`(function (d) {
-  var s=d.createElement('script');
-  s.src='${baseUrl}/nitro-webshot.js';
-  d.head.appendChild(s)
+  app.listen(3000, hostname, function () {
+    console.log('Listening on ' + baseUrl.green )
+
+    console.log('\ncopy and paste following into your browser console:\n'.yellow)
+    console.log(`(function (d) {
+var s=d.createElement('script');
+s.src='${baseUrl}/nitro-webshot.js';
+d.head.appendChild(s)
 })(document);`)
 
-      console.log('\nonce loaded execute following:\n'.yellow)
+    console.log('\nonce loaded execute following:\n'.yellow)
 
-      console.log('var request = nitroWebshot.render();\n\n');
+    console.log('var request = nitroWebshot.render();\n\n');
 
-      fs.writeFileSync('public/index.html' ,
-        '<p>copy and paste following into your browser console:</p>' +
-        `<p><pre><code>(function (d) {
-  var s=d.createElement('script');
-  s.src='${baseUrl}/nitro-webshot.js';
-  d.head.appendChild(s)
+    fs.writeFileSync('public/index.html' ,
+      '<p>copy and paste following into your browser console:</p>' +
+      `<p><pre><code>(function (d) {
+var s=d.createElement('script');
+s.src='${baseUrl}/nitro-webshot.js';
+d.head.appendChild(s)
 })(document);</code></pre></p>` +
-        '<br/>' +
-        '<p>once loaded execute following:</p>' +
-        "<p><pre>var request = nitroWebshot.render();</pre></p>"
-      , { encoding: 'utf8' });
+      '<br/>' +
+      '<p>once loaded execute following:</p>' +
+      "<p><pre>var request = nitroWebshot.render();</pre></p>"
+    , { encoding: 'utf8' });
 
 
-    });
+  });
 }
 
 module.exports = {
   server: runServer
 };
-
-
-// window.checkoutHTML = function () {
-//
-//   // var html = document.documentElement.outerHTML,
-//   //     styles = [];
-//   //
-//   // html = html.replace(/<link[^>]*href="(.*?)"/g, function (_matched, href) {
-//   //   styles.push( fetch(href).then(function (response) { return response.text(); }) );
-//   //   console.debug('loading style', href);
-//   //   return '<style rel="stylkesheet">$css{' + (styles.length - 1) + '}</style>';
-//   // });
-//   //
-//   // return Promise.all(styles).then(function (fetchedStyles) {
-//   //   html = html.replace(/\$css{(.*?)}/g, function (matched, index) {
-//   //     return fetchedStyles[Number(index)];
-//   //   });
-//   //
-//   //   console.log('render html', html);
-//   //   return html;
-//   // });
-//
-//
-//   var matchedBase = location.origin + '/',
-//       html = document.documentElement.outerHTML.replace(/<base\s+href="(.*)"[^>]*\/?>/, function (_matched, base) {
-//         matchedBase = location.origin + base;
-//         return '';
-//       });
-//
-//   return html.replace(/<head>/, '<head><base href="' + matchedBase + '"/>').replace(/\s*<script[^>]*>([\s\S]*?)<\/script>\s*/g, '');
-//
-// };

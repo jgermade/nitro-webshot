@@ -91,18 +91,25 @@
     render: function (options) {
       options = options || {};
 
+      var data = extend(extend({
+        height: window.innerHeight,
+        width: window.innerWidth
+      }, options), {
+        html: options.html || webshot.parsedHTML(),
+        userAgent: navigator.userAgent
+      });
+
       return http('http://localhost:3000/render', {
         method: 'POST',
         contentType: 'application/json',
-        data: extend(options, {
-          html: options.html || webshot.parsedHTML(),
-          height: window.innerHeight,
-          width: window.innerWidth
-        })
+        data: data
       }).done(function (response) {
-        console.log('response', response);
-        console.log('http://localhost:3000' + response.data.file);
+        console.group('rendered');
         console.log('http://localhost:3000' + response.data.htmlFile);
+        console.log('http://localhost:3000' + response.data.phantom);
+        console.log('http://localhost:3000' + response.data.slimer);
+        console.log('response', response);
+        console.groupEnd();
       }).error(function (response) {
         console.error(response);
       });
