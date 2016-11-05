@@ -427,17 +427,16 @@ d.head.appendChild(s)
 
     console.log('var request = nitroWebshot.render();\n\n');
 
-    fs.writeFileSync('public/index.html' ,
-      '<p>copy and paste following into your browser console:</p>' +
-      `<p><pre><code>(function (d) {
+    file.write('public/index.html' ,`
+<p>copy and paste following into your browser console:</p>
+<p><pre><code>(function (d) {
 var s=d.createElement('script');
 s.src='${baseUrl}/nitro-webshot.js';
 d.head.appendChild(s)
-})(document);</code></pre></p>` +
-      '<br/>' +
-      '<p>once loaded execute following:</p>' +
-      "<p><pre>var request = nitroWebshot.render();</pre></p>"
-    , { encoding: 'utf8' });
+})(document);</code></pre></p>
+<br/>
+<p>once loaded execute following:</p>
+<p><pre>var request = nitroWebshot.render();</pre></p>`);
 
 
   });
