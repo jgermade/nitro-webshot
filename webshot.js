@@ -187,7 +187,7 @@ function runServer (port, hostname) {
         res.json({
           html: html,
           htmlShoot: htmlShoot,
-          htmlFile: `/renders/phantom/${htmlFile}`,
+          htmlFile: `/renders/${htmlFile}`,
           phantom: '/renders/phantom-' + resultFile,
           slimer: '/renders/slimer-' + resultFile
         });
