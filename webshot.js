@@ -62,6 +62,7 @@ var express = require('express')
 var bodyParser = require('body-parser')
 var fs = require('fs')
 var mkdirp = require('mkdirp')
+var URL = require('url')
 
 var $q = require('q-promise');
 function promisify (fn, options) {
@@ -87,31 +88,44 @@ function promisify (fn, options) {
 var fetch = function (url) {
   return $q(function (resolve, reject) {
 
-    url = require('url').parse(url);
+    url = URL.parse(url);
 
     var options = {
       method: 'GET',
       hostname: url.hostname,
       port: url.port,
-      path: url.path
+      path: url.path,
+      encoding: null
     };
 
     options.method = 'GET';
 
-    var data = '';
+    var data = null;
+    // var data = [];
 
     var req = require(url.protocol.replace(/:$/, '')).request(options, (res) => {
       // console.log(`STATUS: ${res.statusCode}`);
       // console.log(`HEADERS: ${JSON.stringify(res.headers)}`);
-      res.setEncoding('utf8');
+      // res.setEncoding('utf8');
+      res.setEncoding('binary');
+
       res.on('data', (chunk) => {
-        data += chunk;
-        // console.log(`BODY: ${chunk}`);
+
+        data = data ? data.concat(chunk) : chunk;
+        // data.push(chunk);
+
       });
+
       res.on('end', () => {
         console.log('fetched', url.format() );
         resolve({ config: options, data: data });
-        // console.log('No more data in response.');
+        // resolve({ config: options, data: Buffer.concat(data) });
+      });
+
+      res.on('error', function(err) {
+        console.log("Error during HTTP request");
+        console.log(err.message);
+        reject(err);
       });
     });
 
@@ -126,6 +140,82 @@ var fetch = function (url) {
 }
 
 fetch.responseData = function (response) { return response.data };
+
+function fetchContentsCSS (css, origin, staticDir) {
+
+  var replaces = [];
+
+  css.replace(/url\(\s*["']?(.*?)["']?\s*\)/g, function (_matched, href) {
+    if( /^data/.test(href) ) {
+      return _matched;
+    }
+
+    console.log('matched css url', href);
+
+    if( /^\//.test(href) ) {
+      href = origin + href;
+    }
+    replaces.push( fetch( href ).then(function (response) {
+      var filename = href.replace(/[?#].*/, '').replace(/[:/]+/g, '-');
+      return file.write( 'public' + staticDir + filename, response.data )
+        .then(function () {
+          return { data: response.data, old: _matched, new: `url('${staticDir}${filename}')`, filename: filename };
+        });
+    }) );
+    return _matched;
+  });
+
+  if( !replaces.length ) {
+    return $q.resolve(css);
+  }
+
+  return $q.all(replaces).then(function (replaces) {
+    replaces.forEach(function (item) {
+      css = css.replace(item.old, item.new);
+    });
+
+    return css;
+  });
+}
+
+function fetchContentsHTML (html, origin, staticDir) {
+
+  var replaces = [];
+
+  html.replace(/<(link|img)([^>]*)(href|src)="(.*?)"([^>]*)>/g, function (_matched, tag, pre, attr, href, post) {
+    if( /^data/.test(href) ) {
+      return _matched;
+    }
+
+    if( /^\//.test(href) ) {
+      href = origin + href;
+    }
+    replaces.push( fetch( href ).then(function (response) {1
+      var filename = href.replace(/[?#].*/, '').replace(/[:/]+/g, '-');
+
+      return ( /\.css$/.test(filename) ? fetchContentsCSS('' + response.data, origin, staticDir) : $q.resolve(response.data) ).then(function (data) {
+        return file.write( 'public' + staticDir + filename, data )
+          .then(function () {
+            return { data: data, old: _matched, new: `<${tag}${pre}${attr}="${staticDir}${filename}"${post}>`, filename: filename };
+          });
+      });
+
+    }) );
+    return _matched;
+  });
+
+  if( !replaces.length ) {
+    return $q.resolve(html);
+  }
+
+  return $q.all(replaces).then(function (replaces) {
+    replaces.forEach(function (item) {
+      html = html.replace(item.old, item.new);
+    });
+
+    return html;
+  });
+}
 
 // fetch('https://doomus.me').then(function (response) {
 //   console.log('fetched data', response.data);
@@ -181,6 +271,13 @@ return `
   `;
 }
 
+// express.static.mime.define({
+//  'application/x-font-woff': ['woff'],
+//  'application/font-woff': ['woff']
+// });
+
+var mime = require('mime-types');
+
 function runServer (port, hostname) {
 
   port = port || 3000;
@@ -194,58 +291,80 @@ function runServer (port, hostname) {
   app.use(bodyParser.urlencoded({ extended: true, limit: '5mb' })); // for parsing application/x-www-form-urlencoded
 
   app.use(function(req, res, next) {
+    if( !req.headers['content-type'] ) {
+      if( /\.woff2?$/.test(req.path) ) {
+        res.header("Content-Type", 'application/font-woff' );
+      }
+    }
+    next();
+  });
+
+  app.use(function(req, res, next) {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
     next();
   });
+  // app.use(function (req, res, next) {
+  //
+  //   // Website you wish to allow to connect
+  //   res.setHeader('Access-Control-Allow-Origin', 'http://localhost:8888');
+  //
+  //   // Request methods you wish to allow
+  //   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
+  //
+  //   // Request headers you wish to allow
+  //   res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type');
+  //
+  //   // Set to true if you need the website to include cookies in the requests sent
+  //   // to the API (e.g. in case you use sessions)
+  //   res.setHeader('Access-Control-Allow-Credentials', true);
+  //
+  //   // Pass to next layer of middleware
+  //   next();
+  // });
 
   app.use(express.static('public'))
 
   app.post('/api/render', function (req, res) {
 
     var html = req.body.html,
-        htmlShoot = htmlNoAnimations(htmlNoScripts(html));
+        referer = URL.parse(req.body.referer),
+        origin = referer.protocol + '//' + referer.host;
 
-    var resultFile = uuid4() + ( req.body.filename ? ( '/' + req.body.filename ) : '.png' ),
-        htmlFile = resultFile.replace(/\.[a-zA-Z]+$/, '.html')
+    var id = uuid4(),
+        resultFile = id + ( req.body.filename ? ( '/' + req.body.filename ) : '.png' ),
+        htmlFile = resultFile.replace(/\.[a-zA-Z]+$/, '.html');
 
     var phantomScript = '/tmp/nitro-webshot/phantom-' + resultFile + '.js',
         slimerScript = '/tmp/nitro-webshot/slimer-' + resultFile + '.js';
 
-    (function () {
+    console.log('\n## CREATING FOLDERS \n');
 
-      var styles = [];
+    $q.all([
+      file.write('last.html', html),
+      file.mkdirp( 'public/shots/' + id + '/static' ),
+      file.mkdirp( dirname('public/renders/phantom-' + resultFile) ),
+      file.mkdirp( dirname('public/renders/slimer-' + resultFile) ),
+      file.mkdirp( dirname(phantomScript) )
+    ]).then(function () {
 
-      html = html.replace(/<link[^>]*href="(.*?)"[^>]*>/g, function (_matched, href) {
-        if( /^\//.test(href) ) {
-          href = req.body.origin + href;
-        }
-        styles.push( fetch( href ).then(function (response) {
-          return { data: response.data, link: _matched };
-        }) );
-        return _matched;
-      });
+      console.log('\n## FETCHING CONTENTS \n');
 
-      return $q.all(styles);
+      return fetchContentsHTML( htmlNoAnimations(htmlNoScripts(html)), origin, '/shots/' + id + '/static/' );
 
-    })().then(function () {
+    }).then(function (htmlShot) {
 
-      return $q.all([
-        file.write('last.html', html),
-        file.mkdirp( dirname('public/renders/phantom-' + resultFile) ),
-        file.mkdirp( dirname('public/renders/slimer-' + resultFile) ),
-        file.mkdirp( dirname(phantomScript) )
-      ])
-
-    }).then(function () {
+      console.log('\n## WRITING SCRIPTS \n');
 
       return $q.all([
-        file.write(`public/renders/${htmlFile}`, htmlShoot),
+        file.write(`public/renders/${htmlFile}`, htmlShot),
         file.write( phantomScript, phantomjsCode(baseUrl, req.body, htmlFile, resultFile) ),
         file.write( slimerScript, slimerjsCode(baseUrl, req.body, htmlFile, resultFile) )
-      ]);
+      ]).then(function () { return htmlShot; });
 
-    }).then(function () {
+    }).then(function (htmlShot) {
+
+      console.log('\n## LAUNCHING BROWSERS \n');
 
       $q.all([
         exec('$(npm bin)/phantomjs ' + phantomScript),
@@ -253,11 +372,20 @@ function runServer (port, hostname) {
       ]).then(function () {
         res.json({
           html: html,
-          htmlShoot: htmlShoot,
+          htmlShot: htmlShot,
           htmlFile: `/renders/${htmlFile}`,
-          phantom: '/renders/phantom-' + resultFile,
-          slimer: '/renders/slimer-' + resultFile
+          phantom: `/renders/phantom-${resultFile}`,
+          slimer: `/renders/slimer-${resultFile}`
         });
+
+        console.log('\n-----------------------------------------------------');
+        console.log('\n## ' + 'RENDERED'.yellow );
+        console.log('\n----------------------------------------------------- \n');
+        console.log(`- ${'HTML'.yellow}: ${baseUrl}/renders/${htmlFile}`);
+        console.log(`- phantom: ${baseUrl}/renders/phantom-${resultFile}`);
+        console.log(`- slimer: ${baseUrl}/renders/slimer-${resultFile}`);
+        console.log('\n----------------------------------------------------- \n');
+
       }, function () {
         res.status(500).send('error rendering!');
       });

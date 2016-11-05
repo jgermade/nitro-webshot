@@ -1,6 +1,6 @@
 {
   "name": "nitro-webshot",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -20,6 +20,7 @@
     "body-parser": "^1.15.2",
     "colors": "^1.1.2",
     "express": "^4.14.0",
+    "mime-types": "^2.1.12",
     "mkdirp": "^0.5.1",
     "phantomjs": "^2.1.7",
     "q-promise": "^0.3.7",

@@ -1,6 +1,7 @@
 /node_modules
 /render-this-html.js
 /public/renders/*
+/public/shots
 /public/index.html
 /last.html
 .DS_Store

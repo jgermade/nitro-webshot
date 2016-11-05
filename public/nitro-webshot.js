@@ -79,15 +79,6 @@
 
       return html;
     },
-    parsedHTML: function (html) {
-      var matchedBase = location.origin + '/',
-          html = ( html || webshot.documentHTML() ).replace(/<base\s+href="(.*)"[^>]*\/?>/, function (_matched, base) {
-            matchedBase = location.origin + base;
-            return '';
-          });
-
-      return html.replace(/<head>/, '<head>\n<base href="' + matchedBase + '"/>\n');
-    },
     render: function (options) {
       options = options || {};
 
@@ -95,9 +86,9 @@
         height: window.innerHeight,
         width: window.innerWidth
       }, options), {
-        html: options.html || webshot.parsedHTML(),
+        html: options.html || webshot.documentHTML(),
         userAgent: navigator.userAgent,
-        origin: location.origin
+        referer: location.href
       });
 
       return http('http://localhost:3000/api/render', {
@@ -114,47 +105,6 @@
       }).error(function (response) {
         console.error(response);
       });
-    },
-    renderInline: function (options) {
-      options = options || {};
-
-      var html = webshot.documentHTML(),
-          styles = [], i = 0;
-
-      html = html.replace(/<link[^>]*href="(.*?)"[^>]*>/g, function (_matched, href) {
-
-        if( !/\.css(\?|$)/.test(href) || ( /^https?:\/\//.test(href) && href.trim().indexOf(location.origin) < 0 ) ) {
-          return _matched;
-        }
-
-        var n = i++;
-
-        styles[n] = null;
-        console.log('loading style', href );
-        http( href ).done(function (response) {
-          styles[n] = response.data.replace(/url\(["']?(\/.*?)["']?\)/g, function (matched, url) {
-            return 'url(\'' + location.origin + url + '\')';
-          });
-
-          if( styles.every(function (style) { return style !== null; }) ) {
-
-            webshot.render(extend(options, {
-              html: webshot.parsedHTML( html.replace(/\$css{(.*?)}/g, function (matched, index) {
-                return styles[Number(index)];
-              }).replace(/<img(.*?)src="(\/.*?)"/g, function (matched, props, src) {
-                return '<img' + props + 'src="' + location.origin + src + '"';
-              }) )
-            }));
-          }
-        });
-
-        return '\n<style rel="stylesheet">\n$css{' + (styles.length - 1) + '}\n</style>\n';
-      });
-
-      if( !i ) {
-        webshot.render(extend(options || {}, { html: webshot.parsedHTML(html) }));
-      }
-
     }
   };
 
