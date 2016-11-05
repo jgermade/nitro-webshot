@@ -96,10 +96,11 @@
         width: window.innerWidth
       }, options), {
         html: options.html || webshot.parsedHTML(),
-        userAgent: navigator.userAgent
+        userAgent: navigator.userAgent,
+        origin: location.origin
       });
 
-      return http('http://localhost:3000/render', {
+      return http('http://localhost:3000/api/render', {
         method: 'POST',
         contentType: 'application/json',
         data: data

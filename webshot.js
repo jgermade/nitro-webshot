@@ -84,6 +84,53 @@ function promisify (fn, options) {
   };
 }
 
+var fetch = function (url) {
+  return $q(function (resolve, reject) {
+
+    url = require('url').parse(url);
+
+    var options = {
+      method: 'GET',
+      hostname: url.hostname,
+      port: url.port,
+      path: url.path
+    };
+
+    options.method = 'GET';
+
+    var data = '';
+
+    var req = require(url.protocol.replace(/:$/, '')).request(options, (res) => {
+      // console.log(`STATUS: ${res.statusCode}`);
+      // console.log(`HEADERS: ${JSON.stringify(res.headers)}`);
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        data += chunk;
+        // console.log(`BODY: ${chunk}`);
+      });
+      res.on('end', () => {
+        console.log('fetched', url.format() );
+        resolve({ config: options, data: data });
+        // console.log('No more data in response.');
+      });
+    });
+
+    req.on('error', (e) => {
+      reject(e);
+      // console.log(`problem with request: ${e.message}`);
+    });
+
+    req.end();
+
+  });
+}
+
+fetch.responseData = function (response) { return response.data };
+
+// fetch('https://doomus.me').then(function (response) {
+//   console.log('fetched data', response.data);
+// });
+
 var _readFile = promisify(fs.createReadStream),
     _writeFile = promisify(fs.createWriteStream),
     file = {
@@ -154,7 +201,7 @@ function runServer (port, hostname) {
 
   app.use(express.static('public'))
 
-  app.post('/render', function (req, res) {
+  app.post('/api/render', function (req, res) {
 
     var html = req.body.html,
         htmlShoot = htmlNoAnimations(htmlNoScripts(html));
@@ -165,12 +212,32 @@ function runServer (port, hostname) {
     var phantomScript = '/tmp/nitro-webshot/phantom-' + resultFile + '.js',
         slimerScript = '/tmp/nitro-webshot/slimer-' + resultFile + '.js';
 
-    $q.all([
-      file.write('last.html', html),
-      file.mkdirp( dirname('public/renders/phantom-' + resultFile) ),
-      file.mkdirp( dirname('public/renders/slimer-' + resultFile) ),
-      file.mkdirp( dirname(phantomScript) )
-    ]).then(function () {
+    (function () {
+
+      var styles = [];
+
+      html = html.replace(/<link[^>]*href="(.*?)"[^>]*>/g, function (_matched, href) {
+        if( /^\//.test(href) ) {
+          href = req.body.origin + href;
+        }
+        styles.push( fetch( href ).then(function (response) {
+          return { data: response.data, link: _matched };
+        }) );
+        return _matched;
+      });
+
+      return $q.all(styles);
+
+    })().then(function () {
+
+      return $q.all([
+        file.write('last.html', html),
+        file.mkdirp( dirname('public/renders/phantom-' + resultFile) ),
+        file.mkdirp( dirname('public/renders/slimer-' + resultFile) ),
+        file.mkdirp( dirname(phantomScript) )
+      ])
+
+    }).then(function () {
 
       return $q.all([
         file.write(`public/renders/${htmlFile}`, htmlShoot),
