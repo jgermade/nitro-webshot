@@ -157,9 +157,9 @@ function fetchContentsCSS (css, origin, staticDir) {
     }
     replaces.push( fetch( href ).then(function (response) {
       var filename = href.replace(/[?#].*/, '').replace(/[:/]+/g, '-');
-      return file.write( 'public' + staticDir + filename, response.data )
+      return file.write( `public/${staticDir}/${filename}`, response.data )
         .then(function () {
-          return { data: response.data, old: _matched, new: `url('${staticDir}${filename}')`, filename: filename };
+          return { data: response.data, old: _matched, new: `url('/${staticDir}/${filename}')`, filename: filename };
         });
     }) );
     return _matched;
@@ -194,9 +194,9 @@ function fetchContentsHTML (html, origin, staticDir) {
       var filename = href.replace(/[?#].*/, '').replace(/[:/]+/g, '-');
 
       return ( /\.css$/.test(filename) ? fetchContentsCSS('' + response.data, origin, staticDir) : $q.resolve(response.data) ).then(function (data) {
-        return file.write( 'public' + staticDir + filename, data )
+        return file.write( `public/${staticDir}/${filename}`, data )
           .then(function () {
-            return { data: data, old: _matched, new: `<${tag}${pre}${attr}="${staticDir}${filename}"${post}>`, filename: filename };
+            return { data: data, old: _matched, new: `<${tag}${pre}${attr}="/${staticDir}/${filename}"${post}>`, filename: filename };
           });
       });
 
@@ -230,7 +230,7 @@ var _readFile = promisify(fs.createReadStream),
     },
     exec = promisify(require('child_process').exec);
 
-function phantomjsCode (baseUrl, req, htmlFile, resultFile) {
+function phantomjsCode (req, url, resultFile) {
 return `
   var page = require('webpage').create();
   // if( '${ req.userAgent }' ) {
@@ -239,7 +239,7 @@ return `
   //   };
   // }
   page.viewportSize = { width: ${ req.width || 1360 }, height: ${ req.height || 900 } };
-  page.open('${baseUrl}/renders/${htmlFile}', function(status) {
+  page.open('${url}', function(status) {
     console.log("Status: " + status);
     if(status === "success") {
       page.scrollPosition = {
@@ -247,7 +247,7 @@ return `
         left: 0
       };
       setTimeout(function() {
-        page.render('public/renders/phantom-${resultFile}');
+        page.render('${resultFile}');
         phantom.exit();
       }, ${ req.wait || 1000 });
     }
@@ -255,16 +255,16 @@ return `
   `;
 }
 
-function slimerjsCode (baseUrl, req, htmlFile, resultFile) {
+function slimerjsCode (req, url, resultFile) {
 return `
   var webpage = require('webpage').create();
   webpage
-  .open('${baseUrl}/renders/${htmlFile}')
+  .open('${url}')
   .then(function(){
     // store a screenshot of the page
     webpage.viewportSize = { width: ${ req.width || 1360 }, height: ${ req.height || 900 } };
-    // webpage.render('public/renders/slimer-${resultFile}', { onlyViewport: true });
-    webpage.render('public/renders/slimer-${resultFile}', { onlyViewport: false });
+    // webpage.render('${resultFile}', { onlyViewport: true });
+    webpage.render('${resultFile}', { onlyViewport: false });
 
     slimer.exit();
   });
@@ -332,35 +332,36 @@ function runServer (port, hostname) {
         origin = referer.protocol + '//' + referer.host;
 
     var id = uuid4(),
-        resultFile = id + ( req.body.filename ? ( '/' + req.body.filename ) : '.png' ),
-        htmlFile = resultFile.replace(/\.[a-zA-Z]+$/, '.html');
+        shotdir = `shots/${id}`;
 
-    var phantomScript = '/tmp/nitro-webshot/phantom-' + resultFile + '.js',
-        slimerScript = '/tmp/nitro-webshot/slimer-' + resultFile + '.js';
+    var phantomScript = `/tmp/nitro-webshot/phantom-${id}.js`,
+        slimerScript = `/tmp/nitro-webshot/slimer-${id}.js`;
 
     console.log('\n## CREATING FOLDERS \n');
 
     $q.all([
       file.write('last.html', html),
-      file.mkdirp( 'public/shots/' + id + '/static' ),
-      file.mkdirp( dirname('public/renders/phantom-' + resultFile) ),
-      file.mkdirp( dirname('public/renders/slimer-' + resultFile) ),
+      file.mkdirp(`public/${shotdir}/static`),
       file.mkdirp( dirname(phantomScript) )
     ]).then(function () {
 
       console.log('\n## FETCHING CONTENTS \n');
 
-      return fetchContentsHTML( htmlNoAnimations(htmlNoScripts(html)), origin, '/shots/' + id + '/static/' );
+      return fetchContentsHTML( htmlNoAnimations(htmlNoScripts(html)), origin, `${shotdir}/static`);
 
     }).then(function (htmlShot) {
 
       console.log('\n## WRITING SCRIPTS \n');
 
       return $q.all([
-        file.write(`public/renders/${htmlFile}`, htmlShot),
-        file.write( phantomScript, phantomjsCode(baseUrl, req.body, htmlFile, resultFile) ),
-        file.write( slimerScript, slimerjsCode(baseUrl, req.body, htmlFile, resultFile) )
-      ]).then(function () { return htmlShot; });
+        file.write(`public/${shotdir}/index.html`, htmlShot),
+        file.write( phantomScript, phantomjsCode(req.body, `${baseUrl}/${shotdir}/`, `public/${shotdir}/phantom-${id}.png`) ),
+        file.write( slimerScript, slimerjsCode(req.body, `${baseUrl}/${shotdir}/`, `public/${shotdir}/slimer-${id}.png`) )
+      ]).then(function () {
+        console.log('phantomScript', fs.readFileSync(phantomScript, { encoding: 'utf8' }) );
+        console.log('slimerScript', fs.readFileSync(slimerScript, { encoding: 'utf8' }) );
+        return htmlShot;
+      });
 
     }).then(function (htmlShot) {
 
@@ -373,17 +374,17 @@ function runServer (port, hostname) {
         res.json({
           html: html,
           htmlShot: htmlShot,
-          htmlFile: `/renders/${htmlFile}`,
-          phantom: `/renders/phantom-${resultFile}`,
-          slimer: `/renders/slimer-${resultFile}`
+          htmlFile: `/${shotdir}/`,
+          phantom: `/${shotdir}/phantom-${id}.png`,
+          slimer: `/${shotdir}/slimer-${id}.png`
         });
 
         console.log('\n-----------------------------------------------------');
         console.log('\n## ' + 'RENDERED'.yellow );
         console.log('\n----------------------------------------------------- \n');
-        console.log(`- ${'HTML'.yellow}: ${baseUrl}/renders/${htmlFile}`);
-        console.log(`- phantom: ${baseUrl}/renders/phantom-${resultFile}`);
-        console.log(`- slimer: ${baseUrl}/renders/slimer-${resultFile}`);
+        console.log(`- ${'HTML'.yellow}: ${baseUrl}/${shotdir}/`);
+        console.log(`- phantom: ${baseUrl}/${shotdir}/phantom-${id}.png`);
+        console.log(`- slimer: ${baseUrl}/${shotdir}/slimer-${id}.png`);
         console.log('\n----------------------------------------------------- \n');
 
       }, function () {
